@@ -22,7 +22,10 @@ from src.preprocessing.selection import train_test_split
 
 
 class TrainerDialog(QDialog):
-    """ Base class for all trainer dialogs. It utilizes a standard train/eval and tuning procedures for all models. """
+    """ 
+    Customized Trainer Dialog for Malebane.
+    Added BTTS, Exact Goals, and Corners to the UI menu.
+    """
 
     def __init__(
             self,
@@ -48,8 +51,15 @@ class TrainerDialog(QDialog):
         self._height = height
         self._supports_calibration = supports_calibration
 
-        # Set trainer placeholders.
-        self._target_types = {'Result (1/X/2)': TargetType.RESULT, 'U/O-2.5': TargetType.OVER_UNDER}
+        # --- MALEBANE'S CUSTOM TARGET MENU ---
+        self._target_types = {
+            'Result (1/X/2)': TargetType.RESULT, 
+            'Over/Under 2.5': TargetType.OVER_UNDER,
+            'BTTS (Goal/No Goal)': TargetType.BTTS,
+            'Exact Total Goals': TargetType.EXACT_GOALS,
+            'Corners (Over 9.5)': TargetType.CORNERS
+        }
+        
         self._normalizer_types = {
             'None': None,
             'Standard': NormalizerType.STANDARD,
@@ -172,7 +182,7 @@ class TrainerDialog(QDialog):
             SimpleTableDialog(df=metrics_df, parent=self, title='Cross Validation Results').show()
             model_config['train']['results']['cv'] = metrics_df
 
-        # Apply Cross Validation
+        # Apply Sliding Cross Validation
         if self._check_sliding_cross_valid.isChecked():
             model = model_cls(**model_config)
             metrics_df = TaskRunnerDialog(
@@ -284,7 +294,7 @@ class TrainerDialog(QDialog):
         model_hbox.addWidget(self._line_edit_id)
 
         self._combo_target = QComboBox()
-        self._combo_target.setFixedWidth(120)
+        self._combo_target.setFixedWidth(180) # Increased width for new names
         for target in self._target_types:
             self._combo_target.addItem(target)
         model_hbox.addWidget(QLabel(' Target: '))
@@ -392,10 +402,9 @@ class TrainerDialog(QDialog):
 
         # Adding evaluation options widgets.
         eval_row = QHBoxLayout()
-        eval_row.setContentsMargins(0, 10, 0, 0)     # Adding 10px top margin.
+        eval_row.setContentsMargins(0, 10, 0, 0)
         eval_row.setSpacing(8)
 
-        # Adding left/right horizontal lines (separators).
         left_line = QFrame()
         left_line.setFrameShape(QFrame.Shape.HLine)
         left_line.setFrameShadow(QFrame.Shadow.Sunken)
@@ -403,7 +412,6 @@ class TrainerDialog(QDialog):
         right_line.setFrameShape(QFrame.Shape.HLine)
         right_line.setFrameShadow(QFrame.Shadow.Sunken)
 
-        # stretch to keep the middle centered; lines expand, label stays centered
         eval_row.addStretch(1)
         eval_row.addWidget(left_line, 1)
         eval_row.addWidget(QLabel('Model Evaluation'))
@@ -445,8 +453,6 @@ class TrainerDialog(QDialog):
             layout: QHBoxLayout,
             tooltip: Optional[str]
     ):
-        """ Adds a tunable option to the dialog & updates the tunable placeholder dict. """
-
         checkbox = QCheckBox(text=f'{name}: ')
         checkbox.setChecked(False)
         checkbox.setToolTip(f'Tune: "{name}"')
@@ -459,8 +465,6 @@ class TrainerDialog(QDialog):
         self._tunable_placeholders[placeholder_name] = {'checkbox': checkbox, 'widget': widget}
 
     def _set_tunable_param_states(self, enabled: bool):
-        """ Enables/Disables hyperparameter tuning selections. """
-
         for name, tunable_dict in self._tunable_placeholders.items():
             checkbox = tunable_dict['checkbox']
             tunable_dict['checkbox'].setEnabled(enabled)

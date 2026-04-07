@@ -9,17 +9,15 @@ from src.preprocessing.utils.target import TargetType, construct_targets
 
 
 class DatasetPreprocessor:
-    """ Dataset loader class. It has multiple purposes, including:
-        1) Imputing missing data.
-        2) Constructing Inputs & Targets based on the selected task.
-        3) Normalizing inputs.
-        4) Sampling inputs.
-     """
+    """ 
+    Customized Dataset loader for Malebane.
+    Added support for BTTS, Over/Under, and Corner tracking.
+    """
 
     def __init__(self, drop_week: bool = True):
-        """ Whether to drop week column. It is required to train the DRL agents. """
-
-        self._non_trainable_columns = ['Date', 'Season', 'Home', 'Away', 'HG', 'AG', 'Result', 'Result-U/O', 'HST', 'AST', 'HC', 'AC']
+        # I REMOVED 'HC' and 'AC' from this list so the AI can now "see" corners!
+        # I also removed 'HG' and 'AG' (Goals) so we can use them for BTTS/Overs.
+        self._non_trainable_columns = ['Date', 'Season', 'Home', 'Away', 'Result', 'Result-U/O']
 
         if drop_week:
             self._non_trainable_columns.append('Week')
@@ -36,23 +34,29 @@ class DatasetPreprocessor:
             sampler: Optional[Union[SamplerType, BaseSampler]] = None,
             seed: Optional[int] = None
     ) -> Tuple[np.ndarray, np.ndarray, Optional[TransformerMixin]]:
-        """
-            Preprocesses the dataframe and returns ready-to-train dataset, consisting of (input, target) pairs.
-            :param df: The provided dataframe with the league matches.
-            :param target_type: The selected target type of the dataset.
-            :param normalizer: The normalization method of the input data.
-            :param sampler: The sampling method of the input data.
-            :param one_hot_targets: Whether to one-hot encode the target data.
-            :param seed: The random seed of the sampler.
-            :return: A tuple of: inputs (np.ndarray), targets (np.ndarray), normalizer (TransformerMixin)
-        """
+        
+        df = df.dropna().copy()
 
-        df = df.dropna()
+        # --- CUSTOM MALEBANE CALCULATIONS START ---
+        # 1. BTTS (Both Teams to Score)
+        if 'HG' in df.columns and 'AG' in df.columns:
+            df['BTTS'] = ((df['HG'] > 0) & (df['AG'] > 0)).astype(int)
+            
+            # 2. Over 2.5 Goals
+            df['Over_2_5'] = ((df['HG'] + df['AG']) > 2.5).astype(int)
+            
+            # 3. Exact Total Goals
+            df['Total_Goals'] = df['HG'] + df['AG']
+            
+        # 4. Total Corners (Home Corners + Away Corners)
+        if 'HC' in df.columns and 'AC' in df.columns:
+            df['Total_Corners'] = df['HC'] + df['AC']
+        # --- CUSTOM MALEBANE CALCULATIONS END ---
 
-        # Construct inputs.
+        # Construct inputs (The AI features)
         x = df.drop(columns=self._non_trainable_columns, errors='ignore').to_numpy(dtype=np.float32)
 
-        # Construct targets.
+        # Construct targets (What we are trying to predict)
         y = construct_targets(df=df, target_type=target_type)
 
         # Apply input normalization and sampling.
@@ -61,8 +65,8 @@ class DatasetPreprocessor:
         if sampler is not None:
             x, y, sampler = sample(x=x, y=y, sampler=sampler, seed=seed)
 
-        # Validate (input, target) pair sizes.
+        # Validate sizes.
         if x.shape[0] != y.shape[0]:
-            raise ValueError(f'Found inconsistent sizes between input and target pairs: {x.shape[0]} vs {y.shape[0]}')
+            raise ValueError(f'Inconsistent sizes: {x.shape[0]} vs {y.shape[0]}')
 
         return x, y, normalizer

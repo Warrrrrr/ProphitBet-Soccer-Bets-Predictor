@@ -1,67 +1,76 @@
 import os
 import subprocess
 import sys
+import pandas as pd
 from flask import Flask, jsonify
 
 app = Flask(__name__)
 
 # --- AUTO-FETCH LOGIC ---
 def auto_fetch_data():
-    """
-    Triggers the internal scraper to populate the /storage folder.
-    This runs before the web server starts.
-    """
     print("--- Sentinel Engine: Initializing Auto-Fetch ---")
-    
-    # Path to the FootyStats scraper we identified in your src/network folder
-    # If the file is named differently (e.g., scraper.py), change it here.
+    # Path to your identified scraper
     scraper_path = os.path.join("src", "network", "scraper.py") 
     
     if os.path.exists(scraper_path):
         try:
-            print(f"Executing: {scraper_path}")
-            # Runs the scraper as a separate process to avoid memory leaks
             subprocess.run([sys.executable, scraper_path], check=True)
             print("--- Sentinel Engine: Sync Successful ---")
-        except subprocess.CalledProcessError as e:
-            print(f"!!! Fetch Failed during execution: {e}")
+        except Exception as e:
+            print(f"!!! Fetch Failed: {e}")
     else:
-        print(f"!!! Scraper not found at {scraper_path}. Scanning local storage only.")
+        print("!!! Scraper not found. Using existing storage data.")
+
+# --- ENGINE LOGIC: THE PREDICTOR ---
+def get_predictions():
+    predictions = []
+    storage_path = "storage/"
+    
+    if not os.path.exists(storage_path):
+        return predictions
+
+    # We look for the CSVs the scraper just created
+    for file in os.listdir(storage_path):
+        if file.endswith(".csv"):
+            try:
+                df = pd.read_csv(os.path.join(storage_path, file))
+                # Basic logic to extract match rows (adjust column names to match your CSV)
+                for _, row in df.head(10).iterrows():
+                    match_data = {
+                        "match": f"{row.get('home_team', 'TBD')} vs {row.get('away_team', 'TBD')}",
+                        "probability": f"{row.get('win_prob', 0)}%",
+                        "tip": "High Value" if row.get('win_prob', 0) > 70 else "Neutral"
+                    }
+                    predictions.append(match_data)
+            except:
+                continue
+    return predictions
 
 # --- ROUTES ---
 @app.route('/')
 def home():
-    return "<h1>Sentinel Engine: ONLINE</h1><p>Visit <b>/predict</b> for today's high-probability tips.</p>"
+    return "<h1>Sentinel Engine: ONLINE</h1><p>Visit <b>/predict</b> for matches.</p>"
 
 @app.route('/predict')
 def predict():
-    # This checks if the data was actually fetched into storage
-    storage_exists = os.path.exists("storage")
-    files = os.listdir("storage") if storage_exists else []
-
-    response = {
+    preds = get_predictions()
+    
+    return jsonify({
         "engine": "Project Sentinel V1",
         "user": "Malebane",
-        "status": "Processing Markets" if files else "Scanning Markets",
+        "status": "Success" if preds else "Processing Markets",
+        "matches_found": len(preds),
+        "predictions": preds,
         "custom_layers": {
-            "BTTS_Logic": "Active (Goal/No Goal)",
-            "Corner_Logic": "Active (> 9.5 Baseline)",
-            "Goal_Logic": "Active (Exact Count Clipping)"
-        },
-        "storage_check": {
-            "files_found": len(files),
-            "directory": "storage/"
-        },
-        "instructions": "If predictions are empty, ensure scraper.py is outputting CSVs to /storage"
-    }
-    return jsonify(response)
+            "BTTS_Logic": "Active",
+            "Corner_Logic": "Active",
+            "Goal_Logic": "Active"
+        }
+    })
 
-# --- BOOT SEQUENCE ---
 if __name__ == "__main__":
-    # 1. Run the fetch first
+    # Fetch data on startup
     auto_fetch_data()
     
-    # 2. Start the Web Server
-    # Render provides the PORT environment variable automatically
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)

@@ -6,71 +6,59 @@ from flask import Flask, jsonify
 
 app = Flask(__name__)
 
-# --- AUTO-FETCH LOGIC ---
 def auto_fetch_data():
     print("--- Sentinel Engine: Initializing Auto-Fetch ---")
-    # Path to your identified scraper
+    # We use the direct path to the scraper you have in your network folder
     scraper_path = os.path.join("src", "network", "scraper.py") 
-    
     if os.path.exists(scraper_path):
         try:
             subprocess.run([sys.executable, scraper_path], check=True)
-            print("--- Sentinel Engine: Sync Successful ---")
         except Exception as e:
-            print(f"!!! Fetch Failed: {e}")
-    else:
-        print("!!! Scraper not found. Using existing storage data.")
+            print(f"Fetch Error: {e}")
 
-# --- ENGINE LOGIC: THE PREDICTOR ---
 def get_predictions():
     predictions = []
     storage_path = "storage/"
     
-    if not os.path.exists(storage_path):
-        return predictions
+    if not os.path.exists(storage_path) or not os.listdir(storage_path):
+        return [{"error": "Storage folder is empty or missing"}]
 
-    # We look for the CSVs the scraper just created
     for file in os.listdir(storage_path):
         if file.endswith(".csv"):
             try:
                 df = pd.read_csv(os.path.join(storage_path, file))
-                # Basic logic to extract match rows (adjust column names to match your CSV)
-                for _, row in df.head(10).iterrows():
-                    match_data = {
-                        "match": f"{row.get('home_team', 'TBD')} vs {row.get('away_team', 'TBD')}",
-                        "probability": f"{row.get('win_prob', 0)}%",
-                        "tip": "High Value" if row.get('win_prob', 0) > 70 else "Neutral"
-                    }
-                    predictions.append(match_data)
-            except:
-                continue
+                if df.empty:
+                    continue
+                
+                # REASONING: Instead of specific names, we take the first 3 columns
+                # This ensures we see data regardless of header naming
+                for _, row in df.head(15).iterrows():
+                    cols = row.index.tolist()
+                    predictions.append({
+                        "match": f"{row[cols[0]]} vs {row[cols[1]]}",
+                        "raw_data": row.to_dict(), # This reveals the real column names to us
+                        "source_file": file
+                    })
+            except Exception as e:
+                predictions.append({"file_error": str(e), "file": file})
     return predictions
 
-# --- ROUTES ---
 @app.route('/')
 def home():
-    return "<h1>Sentinel Engine: ONLINE</h1><p>Visit <b>/predict</b> for matches.</p>"
+    return "<h1>Sentinel Engine: ONLINE</h1><p>Visit <b>/predict</b></p>"
 
 @app.route('/predict')
 def predict():
     preds = get_predictions()
-    
     return jsonify({
         "engine": "Project Sentinel V1",
         "user": "Malebane",
-        "status": "Success" if preds else "Processing Markets",
         "matches_found": len(preds),
         "predictions": preds,
-        "custom_layers": {
-            "BTTS_Logic": "Active",
-            "Corner_Logic": "Active",
-            "Goal_Logic": "Active"
-        }
+        "debug_info": "Check 'raw_data' to see actual CSV headers"
     })
 
 if __name__ == "__main__":
-    # Fetch data on startup
     auto_fetch_data()
-    
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
